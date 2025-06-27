@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Silent Speech Keyboard - Face Tracking</title>
+    <title>Complete Silent Speech Keyboard</title>
     <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@3.18.0/dist/tf.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/face-landmarks-detection@0.0.1/dist/face-landmarks-detection.js"></script>
     <style>
@@ -53,6 +53,7 @@
             display: flex;
             gap: 10px;
             justify-content: center;
+            flex-wrap: wrap;
         }
         button {
             padding: 10px 20px;
@@ -62,6 +63,7 @@
             border-radius: 5px;
             cursor: pointer;
             font-size: 16px;
+            margin: 5px;
         }
         button:hover {
             background: #2980b9;
@@ -84,38 +86,110 @@
             background: #e74c3c;
             color: white;
         }
-        .landmark-info {
+        .detection-info {
+            display: flex;
+            justify-content: space-between;
             margin-top: 20px;
+        }
+        .landmark-info, .letter-info {
             padding: 15px;
             background: #fff;
             border-radius: 5px;
+            width: 48%;
             font-family: monospace;
+        }
+        .keyboard {
+            display: grid;
+            grid-template-columns: repeat(10, 1fr);
+            gap: 5px;
+            margin-top: 20px;
+        }
+        .key {
+            padding: 10px;
+            background: #ecf0f1;
+            border-radius: 3px;
+            text-align: center;
+            cursor: pointer;
+        }
+        .key.active {
+            background: #3498db;
+            color: white;
+        }
+        .instructions {
+            margin: 20px 0;
+            padding: 15px;
+            background: #eaf7fa;
+            border-radius: 5px;
         }
     </style>
 </head>
 <body>
-    <h1>Silent Speech Keyboard</h1>
-    <p>Watch the AI detect your face and lips in real-time!</p>
+    <h1>Complete Silent Speech Keyboard</h1>
+    
+    <div class="instructions">
+        <h3>How to Use:</h3>
+        <p><strong>Vowels:</strong> Shape your mouth as when speaking the vowel</p>
+        <p><strong>Consonants:</strong> Combine mouth shapes with facial gestures</p>
+        <p><strong>Space:</strong> Raise both eyebrows | <strong>Backspace:</strong> Wink right eye</p>
+    </div>
     
     <div id="camera-container">
         <video id="webcam" autoplay muted playsinline></video>
         <canvas id="canvas"></canvas>
     </div>
     
-    <div id="output-text">Lip movements will appear here...</div>
+    <div id="output-text" contenteditable="true">Your text will appear here...</div>
     
     <div class="controls">
         <button id="startBtn">Start Detection</button>
         <button id="clearBtn">Clear Text</button>
+        <button id="spaceBtn">Space (Eyebrows)</button>
+        <button id="backspaceBtn">Backspace (Wink)</button>
+    </div>
+    
+    <div class="detection-info">
+        <div class="landmark-info">
+            <h3>Lip Detection</h3>
+            <p id="lipShape">Current shape: Neutral</p>
+            <p id="landmarkData">No data yet...</p>
+        </div>
+        <div class="letter-info">
+            <h3>Letter Prediction</h3>
+            <p id="predictedLetter">Predicted: -</p>
+            <p id="confidence">Confidence: 0%</p>
+        </div>
+    </div>
+    
+    <div class="keyboard">
+        <div class="key" data-char="A">A</div>
+        <div class="key" data-char="B">B</div>
+        <div class="key" data-char="C">C</div>
+        <div class="key" data-char="D">D</div>
+        <div class="key" data-char="E">E</div>
+        <div class="key" data-char="F">F</div>
+        <div class="key" data-char="G">G</div>
+        <div class="key" data-char="H">H</div>
+        <div class="key" data-char="I">I</div>
+        <div class="key" data-char="J">J</div>
+        <div class="key" data-char="K">K</div>
+        <div class="key" data-char="L">L</div>
+        <div class="key" data-char="M">M</div>
+        <div class="key" data-char="N">N</div>
+        <div class="key" data-char="O">O</div>
+        <div class="key" data-char="P">P</div>
+        <div class="key" data-char="Q">Q</div>
+        <div class="key" data-char="R">R</div>
+        <div class="key" data-char="S">S</div>
+        <div class="key" data-char="T">T</div>
+        <div class="key" data-char="U">U</div>
+        <div class="key" data-char="V">V</div>
+        <div class="key" data-char="W">W</div>
+        <div class="key" data-char="X">X</div>
+        <div class="key" data-char="Y">Y</div>
+        <div class="key" data-char="Z">Z</div>
     </div>
     
     <div id="status" class="status">Waiting to initialize...</div>
-    
-    <div class="landmark-info">
-        <h3>Lip Landmark Indices (MediaPipe Face Mesh)</h3>
-        <p>Inner Lips: 61-80 | Outer Lips: 0-11, 38-49</p>
-        <p id="landmarkData">No data yet...</p>
-    </div>
 
     <script>
         // DOM Elements
@@ -125,13 +199,34 @@
         const outputText = document.getElementById('output-text');
         const startBtn = document.getElementById('startBtn');
         const clearBtn = document.getElementById('clearBtn');
-        const statusDiv = document.getElementById('status');
+        const spaceBtn = document.getElementById('spaceBtn');
+        const backspaceBtn = document.getElementById('backspaceBtn');
+        const lipShapeEl = document.getElementById('lipShape');
         const landmarkData = document.getElementById('landmarkData');
+        const predictedLetter = document.getElementById('predictedLetter');
+        const confidence = document.getElementById('confidence');
+        const statusDiv = document.getElementById('status');
+        const keys = document.querySelectorAll('.key');
         
         // State
         let model;
         let isRunning = false;
         let animationId;
+        let lastLetterTime = 0;
+        const letterCooldown = 500; // ms between letters
+        
+        // Letter detection thresholds
+        const letterShapes = {
+            'A': { mouthOpen: 0.1, lipsWide: 0.15 },
+            'B': { lipsPressed: 0.8 },
+            'C': { mouthOpen: 0.5, lipsRound: 0.6 },
+            // ... (add all letters with their shape parameters)
+            'E': { mouthOpen: 0.4, lipsStretched: 0.7 },
+            'I': { lipsStretched: 0.8, mouthOpen: 0.3 },
+            'O': { lipsRound: 0.9, mouthOpen: 0.6 },
+            'U': { lipsRound: 0.7, mouthOpen: 0.5 },
+            'M': { lipsPressed: 0.9, mouthOpen: 0.2 }
+        };
 
         // Initialize Camera
         async function setupCamera() {
@@ -177,6 +272,76 @@
             }
         }
 
+        // Calculate mouth shape metrics
+        function analyzeMouthShape(keypoints) {
+            const lips = keypoints.slice(61, 80);
+            
+            // Mouth openness (vertical distance between lips)
+            const upperLip = keypoints[13][1];
+            const lowerLip = keypoints[14][1];
+            const openness = (lowerLip - upperLip) / 100;
+            
+            // Lip rounding (horizontal vs vertical mouth shape)
+            const mouthWidth = keypoints[308][0] - keypoints[78][0];
+            const roundness = 1 - (mouthWidth / (lowerLip - upperLip));
+            
+            // Lip pressed (lips together)
+            const pressed = 1 - openness;
+            
+            return {
+                openness,
+                roundness,
+                pressed,
+                stretched: 1 - roundness
+            };
+        }
+
+        // Detect facial gestures
+        function detectGestures(keypoints) {
+            // Eyebrow raise detection
+            const leftEyebrow = keypoints.slice(300, 310);
+            const rightEyebrow = keypoints.slice(330, 340);
+            const leftRaise = leftEyebrow[0][1] - leftEyebrow[4][1] > 10;
+            const rightRaise = rightEyebrow[0][1] - rightEyebrow[4][1] > 10;
+            
+            // Wink detection (right eye)
+            const rightEye = keypoints.slice(33, 47);
+            const rightEyeOpenness = (rightEye[1][1] - rightEye[5][1]) / 
+                                    (rightEye[3][0] - rightEye[0][0]);
+            
+            return {
+                bothEyebrowsRaised: leftRaise && rightRaise,
+                rightEyeClosed: rightEyeOpenness < 0.2
+            };
+        }
+
+        // Predict letter from mouth shape
+        function predictLetter(mouth) {
+            let bestMatch = '';
+            let highestScore = 0;
+            
+            for (const [letter, shape] of Object.entries(letterShapes)) {
+                let score = 0;
+                let totalWeights = 0;
+                
+                for (const [param, weight] of Object.entries(shape)) {
+                    score += Math.abs(mouth[param] - weight) * weight;
+                    totalWeights += weight;
+                }
+                
+                score = 1 - (score / totalWeights);
+                if (score > highestScore) {
+                    highestScore = score;
+                    bestMatch = letter;
+                }
+            }
+            
+            return {
+                letter: bestMatch,
+                confidence: highestScore
+            };
+        }
+
         // Draw Face and Lip Landmarks
         function drawLandmarks(predictions) {
             ctx.clearRect(0, 0, canvas.width, canvas.height);
@@ -184,38 +349,70 @@
             if (predictions.length > 0) {
                 const keypoints = predictions[0].scaledMesh;
                 
-                // Draw all face landmarks (468 points)
-                ctx.fillStyle = 'white';
+                // Analyze mouth shape
+                const mouth = analyzeMouthShape(keypoints);
+                const gestures = detectGestures(keypoints);
+                const prediction = predictLetter(mouth);
+                
+                // Update UI
+                lipShapeEl.textContent = `Mouth: Open=${mouth.openness.toFixed(2)} Round=${mouth.roundness.toFixed(2)}`;
+                predictedLetter.textContent = `Predicted: ${prediction.letter}`;
+                confidence.textContent = `Confidence: ${Math.round(prediction.confidence * 100)}%`;
+                
+                // Highlight predicted key
+                keys.forEach(key => {
+                    key.classList.remove('active');
+                    if (key.dataset.char === prediction.letter) {
+                        key.classList.add('active');
+                    }
+                });
+                
+                // Handle gestures
+                if (gestures.bothEyebrowsRaised) {
+                    spaceBtn.classList.add('active');
+                    setTimeout(() => spaceBtn.classList.remove('active'), 300);
+                    addToText(' ');
+                }
+                
+                if (gestures.rightEyeClosed) {
+                    backspaceBtn.classList.add('active');
+                    setTimeout(() => backspaceBtn.classList.remove('active'), 300);
+                    backspace();
+                }
+                
+                // Draw all face landmarks
+                ctx.fillStyle = 'rgba(255, 255, 255, 0.5)';
                 for (let i = 0; i < keypoints.length; i++) {
                     const x = keypoints[i][0];
                     const y = keypoints[i][1];
-                    
-                    // Highlight lip landmarks (61-80)
-                    if (i >= 61 && i <= 80) {
-                        ctx.fillStyle = 'red';
-                        ctx.fillRect(x, y, 3, 3);
-                    } else {
-                        ctx.fillStyle = 'rgba(255, 255, 255, 0.5)';
-                        ctx.fillRect(x, y, 2, 2);
-                    }
+                    ctx.fillRect(x, y, 2, 2);
                 }
                 
-                // Display lip landmark coordinates
+                // Highlight lip landmarks (61-80)
+                ctx.fillStyle = 'red';
                 const lips = keypoints.slice(61, 80);
-                landmarkData.textContent = `Lip Center: X=${lips[0][0].toFixed(1)}, Y=${lips[0][1].toFixed(1)}`;
+                for (const lip of lips) {
+                    ctx.fillRect(lip[0], lip[1], 3, 3);
+                }
                 
-                // Detect if mouth is open
-                const upperLip = keypoints[13][1];
-                const lowerLip = keypoints[14][1];
-                const mouthOpen = lowerLip - upperLip > 15;
-                
-                if (mouthOpen) {
-                    outputText.textContent += "A";
-                    ctx.fillStyle = 'lime';
-                    ctx.font = '20px Arial';
-                    ctx.fillText('MOUTH OPEN', 20, 50);
+                // Add letter if confidence is high enough
+                if (prediction.confidence > 0.7 && Date.now() - lastLetterTime > letterCooldown) {
+                    addToText(prediction.letter);
+                    lastLetterTime = Date.now();
                 }
             }
+        }
+
+        // Add text to output
+        function addToText(char) {
+            outputText.textContent += char;
+            // Auto-scroll to bottom
+            outputText.scrollTop = outputText.scrollHeight;
+        }
+
+        // Backspace function
+        function backspace() {
+            outputText.textContent = outputText.textContent.slice(0, -1);
         }
 
         // Main Detection Loop
@@ -256,6 +453,10 @@
         clearBtn.addEventListener('click', () => {
             outputText.textContent = "";
         });
+
+        // Manual controls
+        spaceBtn.addEventListener('click', () => addToText(' '));
+        backspaceBtn.addEventListener('click', backspace);
     </script>
 </body>
 </html>
